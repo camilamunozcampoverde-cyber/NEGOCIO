@@ -14,13 +14,16 @@ import {
   Calendar,
   X,
   Minus,
-  Plus
+  Plus,
+  Camera,
+  Upload
 } from 'lucide-react';
+import { GoogleGenAI } from "@google/genai";
 
-const API_URL = "https://script.google.com/macros/s/AKfycbx2q7pA_gduY4Y7qut86gQd16J0y48ALSj1_bthl3C4YNOz1tSyBNQyEHY9_AKKhI5n/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbwCSI5Pai5G6Xp46kcsaRtwRGeFS9wKfMqo-IqD3msFzEzoUlGASb7Mde5nz7coXa-L/exec";
 
 // --- TIPOS ---
-type Step = 'WELCOME' | 'SIZE' | 'FLAVORS' | 'CHECKOUT' | 'SUCCESS';
+type Step = 'WELCOME' | 'SIZE' | 'FLAVORS' | 'DESIGN_ANALYSIS' | 'CHECKOUT' | 'SUCCESS';
 
 interface OrderState {
   size: { shape: string; name: string; price: number; isDouble: boolean } | null;
@@ -32,11 +35,19 @@ interface OrderState {
   clientName: string;
   deliveryDate: string;
   deliveryTime: string;
+  aiDetectedExtras: { name: string; price: number }[];
+  designImage: string | null;
+  designAnalysis: string | null;
+  isAiAnalysisAccepted: boolean;
 }
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export default function App() {
   const [data, setData] = useState<any>(null);
   const [step, setStep] = useState<Step>('WELCOME');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [order, setOrder] = useState<OrderState>({
     size: null,
     baseFlavor: null,
@@ -46,7 +57,11 @@ export default function App() {
     selectedExtras: [],
     clientName: '',
     deliveryDate: '',
-    deliveryTime: '09:00'
+    deliveryTime: '09:00',
+    aiDetectedExtras: [],
+    designImage: null,
+    designAnalysis: null,
+    isAiAnalysisAccepted: false
   });
 
   const [activeOverlay, setActiveOverlay] = useState<'BASE' | 'TOP' | 'EXTRAS' | null>(null);
@@ -74,17 +89,37 @@ export default function App() {
   // --- LÓGICA DE PRECIOS ---
   const calculateTotal = () => {
     let total = 0;
-    // El precio base se toma de los sabores seleccionados
-    total += order.baseFlavor?.price || 0;
-    if (order.size?.isDouble) {
-      total += order.topFlavor?.price || 0;
+    
+    if (!order.size) return 0;
+
+    if (order.size.isDouble) {
+      // Para dos pisos, el precio base es la suma de los sabores/dimensiones de cada tier
+      // Si no se ha elegido sabor aún, usamos el primero de la lista para mostrar un "Desde..."
+      const baseOptions = getFlavorsForSelectedSize('BASE');
+      const topOptions = getFlavorsForSelectedSize('TOP');
+      
+      const basePrice = order.baseFlavor?.price ?? (baseOptions[0]?.price || 0);
+      const topPrice = order.topFlavor?.price ?? (topOptions[0]?.price || 0);
+      
+      total += basePrice + topPrice;
+    } else {
+      // Para tortas simples, el precio lo define el sabor (que incluye el base del tamaño)
+      // O el precio base definido en Step 1 si aún no se selecciona sabor
+      total += order.baseFlavor ? order.baseFlavor.price : (order.size.price || 0);
     }
     
-    // Sumamos los extras
-    total += order.selectedExtras.reduce((acc, e) => acc + e.price, 0);
+    // Sumamos los extras seleccionados manualmente
+    total += order.selectedExtras.reduce((acc, e) => acc + (e.price || 0), 0);
+    
+    // Sumamos extras detectados por la IA (Tasador) - Solo si el cliente aceptó la tasación
+    if (order.isAiAnalysisAccepted) {
+      const aiExtrasTotal = (order.aiDetectedExtras || []).reduce((acc, e) => acc + (Number(e.price) || 0), 0);
+      total += aiExtrasTotal;
+    }
+    
     // Sumamos los rellenos
-    total += order.baseFillings.reduce((acc, f) => acc + f.price, 0);
-    total += order.topFillings.reduce((acc, f) => acc + f.price, 0);
+    total += order.baseFillings.reduce((acc, f) => acc + (f.price || 0), 0);
+    total += order.topFillings.reduce((acc, f) => acc + (f.price || 0), 0);
 
     return total;
   };
@@ -120,8 +155,9 @@ export default function App() {
       ? `Abajo: ${rellenosBase} | Arriba: ${rellenosCima}` 
       : rellenosBase;
 
-    const extrasStr = order.selectedExtras.length > 0 
-      ? order.selectedExtras.map(e => e.name).join(', ') 
+    const aiExtras = order.isAiAnalysisAccepted ? order.aiDetectedExtras : [];
+    const extrasStr = [...order.selectedExtras, ...aiExtras].length > 0 
+      ? [...order.selectedExtras, ...aiExtras].map(e => e.name).join(', ') 
       : 'Ninguno';
 
     const datosPedido = {
@@ -131,7 +167,8 @@ export default function App() {
       detalle: `${formaTamaño} - Sabores: ${saborElegido}`,
       rellenos: rellenosMsj,
       extras: extrasStr,
-      total: `$${total.toFixed(2)}`
+      total: `$${total.toFixed(2)}`,
+      analisisIA: order.designAnalysis || 'N/A'
     };
 
     let finalMessage = "";
@@ -182,14 +219,20 @@ export default function App() {
     // --- LÓGICA ESPECIAL PARA DOS PISOS ---
     if (order.size.isDouble) {
       targetShape = "Circular"; // Los pisos de las tortas dobles siempre son circulares
-      const totalPortions = order.size.name.split(' ')[0];
+      const totalPortions = parseInt(order.size.name.split(' ')[0]);
       
-      if (totalPortions === "45") {
-        targetPortionName = floor === 'BASE' ? "30" : "20";
-      } else if (totalPortions === "60") {
+      // Mapeo dinámico de porciones por piso para tortas de dos niveles
+      if (totalPortions === 30) {
+        targetPortionName = floor === 'BASE' ? "20" : "10";
+      } else if (totalPortions === 45) {
+        targetPortionName = floor === 'BASE' ? "30" : "15";
+      } else if (totalPortions === 60) {
         targetPortionName = floor === 'BASE' ? "30" : "30";
-      } else if (totalPortions === "70") {
+      } else if (totalPortions === 70 || totalPortions === 75) {
         targetPortionName = floor === 'BASE' ? "45" : "30";
+      } else {
+        // Fallback genérico si no coincide exactamente
+        targetPortionName = floor === 'BASE' ? "30" : "15";
       }
     }
 
@@ -214,6 +257,116 @@ export default function App() {
       price: parseFloat(row[name]) || 0,
       image: getImageUrl(name)
     }));
+  };
+
+  const analyzeImage = async (base64Img: string) => {
+    setIsAnalyzing(true);
+    setAnalysisError(null);
+    try {
+      // Consolidamos la lista de adornos de Sheets con los precios específicos del usuario
+      const baseAdornosMap: { [key: string]: number } = {
+        "Perlas": 1.5,
+        "Mariposas": 1.0,
+        "Flores naturales": 1.0,
+        "Topper Personalizado": 2.0
+      };
+      
+      const adornosListStr = Object.entries(baseAdornosMap).map(([name, price]) => `${name}: $${price}`).join(', ');
+      const adornosFromSheets = data?.Adornos?.map((a: any) => `${a.Adorno}: $${a.Precio}`).join(', ') || "";
+      
+      const prompt = `Actúa como la asistente inteligente de tasación para Pan & Canela. Tu objetivo es analizar la imagen de referencia para calcular costos extras.
+
+REGLAS DE NEGOCIO:
+- SOLO trabajamos con crema/ganache. Si detectas FONDANT, rechaza amablemente.
+- PRECIOS DE EXTRAS (Súmalos si los ves):
+  ${adornosListStr}
+  ${adornosFromSheets ? `Otros: ${adornosFromSheets}` : ""}
+
+FORMATO DE RESPUESTA:
+1. Un breve informe descriptivo (sin pasos numerados).
+2. Una lista clara llamada "DETALLES DETECTADOS:" con los nombres de los adornos.
+3. Un bloque JSON final EXACTAMENTE así:
+   json_data: {"extras": [{"name": "nombre", "price": valor}, ...]}
+
+Sé sofisticada y precisa.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: {
+          parts: [
+            { inlineData: { data: base64Img.split(',')[1], mimeType: "image/png" } },
+            { text: prompt }
+          ]
+        }
+      });
+      const responseText = response.text || "";
+      
+      // Separar el informe del JSON técnico
+      const reportText = responseText.split('json_data:')[0].trim();
+
+      // Intentar extraer el JSON de la respuesta
+      const jsonMatch = responseText.match(/json_data:\s*({[\s\S]*?})/);
+      let detectedExtras: {name: string, price: number}[] = [];
+
+      if (jsonMatch) {
+        try {
+          // Limpieza de JSON: Eliminar posibles comentarios o caracteres invisibles que la IA a veces añade
+          let cleanJson = jsonMatch[1]
+            .replace(/,\s*}/g, '}') // Eliminar comas finales en objetos
+            .replace(/,\s*]/g, ']') // Eliminar comas finales en arrays
+            .replace(/([a-zA-Z0-9_]+):/g, '"$1":'); // Asegurar comillas en los keys
+            
+          const parsed = JSON.parse(cleanJson);
+          detectedExtras = parsed.extras || [];
+        } catch (e) {
+          console.warn("Error parsing AI JSON, using fallback keyword detection:", e);
+        }
+      } 
+      
+      // FALLBACK REFORZADO: Si el JSON falló o está vacío, escaneamos el texto por palabras clave
+      if (detectedExtras.length === 0) {
+        const lowerCaseResponse = responseText.toLowerCase();
+        Object.entries(baseAdornosMap).forEach(([key, price]) => {
+          if (lowerCaseResponse.includes(key.toLowerCase())) {
+            // Evitar duplicados si ya se detectó algo por milagro
+            if (!detectedExtras.find(e => e.name === key)) {
+              detectedExtras.push({ name: key, price: price });
+            }
+          }
+        });
+      }
+
+      const isFondant = responseText.toLowerCase().includes("no trabajamos con fondant");
+
+      setOrder(prev => ({
+        ...prev,
+        designImage: base64Img,
+        designAnalysis: reportText,
+        aiDetectedExtras: detectedExtras,
+        isAiAnalysisAccepted: false
+      }));
+
+      if (isFondant) {
+        setAnalysisError(reportText);
+      }
+
+    } catch (err) {
+      console.error("Error en análisis IA:", err);
+      setAnalysisError("Lo sentimos, no pudimos analizar la imagen en este momento. Puedes continuar y enviarnos el diseño por WhatsApp.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        analyzeImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   return (
@@ -324,7 +477,7 @@ export default function App() {
                     <div className="absolute bottom-0 left-0 right-0 p-8 text-center sm:text-left">
                       <h4 className="font-serif text-3xl mb-1 italic">{f.name}</h4>
                       <p className="text-gold/80 font-black text-xs uppercase tracking-[0.2em] mb-8 italic">
-                        Precio: ${f.price.toFixed(2)}
+                        {f.price > 0 ? `Sabor Premium: +$${f.price.toFixed(2)}` : 'Sabor Gourmet'}
                       </p>
                       <button 
                         onClick={() => {
@@ -362,7 +515,7 @@ export default function App() {
                         <div className="absolute bottom-0 left-0 right-0 p-8 text-center sm:text-left">
                           <h4 className="font-serif text-3xl mb-1 italic">{f.name}</h4>
                           <p className="text-gold/80 font-black text-xs uppercase tracking-[0.2em] mb-8 italic">
-                            Precio: ${f.price.toFixed(2)}
+                            {f.price > 0 ? `Sabor Premium: +$${f.price.toFixed(2)}` : 'Sabor Gourmet'}
                           </p>
                           <button 
                             onClick={() => {
@@ -401,6 +554,115 @@ export default function App() {
                 </div>
               </button>
             </div>
+          </motion.div>
+        )}
+
+        {step === 'DESIGN_ANALYSIS' && (
+          <motion.div 
+            key="design_analysis"
+            initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.1 }}
+            className="p-8 pt-32 min-h-screen pb-48 z-10 relative flex flex-col items-center text-center"
+          >
+            <div className="mb-10">
+              <h2 className="text-gold uppercase tracking-[0.4em] text-[10px] font-black mb-2 italic">Tasación Inteligente</h2>
+              <h3 className="font-serif text-4xl italic">Sube tu Diseño</h3>
+              <p className="text-white/40 font-light mt-4 text-sm leading-relaxed italic">
+                Analizaremos tu imagen para detectar decoraciones extras y asegurar que podamos realizar tu pedido.
+              </p>
+            </div>
+
+            {!order.designImage && !isAnalyzing ? (
+              <div className="grid gap-6 w-full max-w-sm">
+                <label className="flex flex-col items-center justify-center p-12 border-2 border-dashed border-gold/20 rounded-[3rem] bg-gold/5 cursor-pointer hover:bg-gold/10 transition-all group">
+                  <div className="w-16 h-16 bg-gold text-petroleo rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                    <Camera size={28} strokeWidth={3} />
+                  </div>
+                  <span className="font-black text-[10px] tracking-[0.3em] uppercase mb-1">Subir Referencia</span>
+                  <span className="text-[10px] opacity-30 italic">Click para abrir galería</span>
+                  <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
+                </label>
+
+                <button 
+                  onClick={() => setStep('CHECKOUT')}
+                  className="p-8 bg-white/5 border border-white/5 rounded-[3rem] flex items-center justify-between group hover:border-gold/30 transition-all font-sans text-left"
+                >
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mb-1">Sin Referencia</p>
+                    <p className="text-sm font-bold italic">Pasar diseño por WhatsApp</p>
+                  </div>
+                  <div className="p-3 bg-petroleo rounded-full text-gold group-hover:translate-x-2 transition-transform">
+                    <ChevronRight size={18} strokeWidth={3} />
+                  </div>
+                </button>
+              </div>
+            ) : isAnalyzing ? (
+              <div className="flex flex-col items-center justify-center p-20 gap-8">
+                 <div className="relative">
+                    <div className="w-24 h-24 border-4 border-gold/20 border-t-gold rounded-full animate-spin" />
+                    <Star className="absolute inset-0 m-auto text-gold animate-pulse" size={32} />
+                 </div>
+                 <div className="space-y-2">
+                   <p className="font-black text-[10px] uppercase tracking-[0.5em] text-gold animate-pulse">Analizando...</p>
+                   <p className="text-[10px] opacity-40 italic">La IA está tasando los detalles artesanales</p>
+                 </div>
+              </div>
+            ) : (
+              <div className="w-full space-y-10">
+                <div className="relative w-full aspect-video rounded-[2.5rem] overflow-hidden shadow-2xl border border-white/10 group">
+                  <img src={order.designImage!} className="w-full h-full object-cover" alt="Diseño" />
+                  <button 
+                    onClick={() => setOrder(prev => ({ ...prev, designImage: null, designAnalysis: null, aiDetectedExtras: [], isAiAnalysisAccepted: false }))}
+                    className="absolute top-4 right-4 p-3 bg-petroleo/80 backdrop-blur-md rounded-full text-white/50 hover:text-white"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                {order.designAnalysis && (
+                  <div className="bg-gold/5 border border-gold/20 p-8 rounded-[2.5rem] text-left relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4 opacity-10 rotate-12">
+                      <Star size={80} />
+                    </div>
+                    <div className="relative z-10">
+                      <h4 className="font-black text-[10px] uppercase tracking-[0.4em] text-gold mb-6 italic">Informe de Tasación</h4>
+                      <div className="text-xs text-white/70 leading-relaxed font-light italic whitespace-pre-wrap mb-8">
+                        {order.designAnalysis}
+                      </div>
+                      
+                      {order.aiDetectedExtras.length > 0 && (
+                        <div className="pt-6 border-t border-white/5">
+                           <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-4 text-white/30">Cargos Adicionales Detectados:</p>
+                           <div className="flex flex-wrap gap-2">
+                             {order.aiDetectedExtras.map((e, idx) => (
+                               <div key={idx} className="px-3 py-1 bg-gold/10 text-gold rounded-full text-[10px] font-bold border border-gold/20">
+                                 {e.name}: +${e.price.toFixed(2)}
+                               </div>
+                             ))}
+                           </div>
+                        </div>
+                      )}
+
+                      {analysisError ? (
+                         <div className="mt-8 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex gap-3 items-start">
+                            <Info className="text-red-400 shrink-0 mt-1" size={16} />
+                            <p className="text-[11px] text-red-200/60 leading-relaxed italic">{analysisError}</p>
+                         </div>
+                      ) : (
+                        <button 
+                          onClick={() => {
+                            setOrder(p => ({ ...p, isAiAnalysisAccepted: true }));
+                            setStep('CHECKOUT');
+                          }}
+                          className="w-full mt-10 py-5 bg-gold text-petroleo font-black rounded-full text-[10px] tracking-[0.4em] uppercase shadow-2xl active:scale-95 transition-all"
+                        >
+                          CONFIRMAR Y CONTINUAR
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </motion.div>
         )}
 
@@ -539,6 +801,16 @@ export default function App() {
                             return Object.entries(counts).map(([name, count]) => count > 1 ? `${count}x ${name}` : name).join(', ');
                           })()
                         }
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Extras detectados por IA */}
+                  {order.isAiAnalysisAccepted && order.aiDetectedExtras.length > 0 && (
+                    <div className="pt-2">
+                      <p className="text-[10px] font-bold uppercase text-gold/60 tracking-tighter">Detalles de Diseño (IA)</p>
+                      <p className="text-[10px] font-medium italic opacity-70">
+                        {order.aiDetectedExtras.map(e => e.name).join(', ')}
                       </p>
                     </div>
                   )}
@@ -702,15 +974,17 @@ export default function App() {
                           <div className="flex items-center gap-4 bg-petroleo/40 rounded-2xl p-1 border border-white/5">
                             <button 
                               onClick={removeFilling}
-                              className={`p-2 rounded-xl transition-all ${count > 0 ? 'text-gold hover:bg-gold/20' : 'text-white/10 cursor-not-allowed'}`}
+                              className={`p-2 rounded-xl transition-all ${count > 0 ? 'text-gold hover:bg-gold/20' : 'text-white/5 cursor-not-allowed'}`}
                               disabled={count === 0}
                             >
                               <Minus size={16} strokeWidth={3} />
                             </button>
-                            <span className={`w-6 text-center font-black text-sm italic ${count > 0 ? 'text-gold' : 'text-white/20'}`}>{count}</span>
+                            <span className={`w-6 text-center font-black text-sm italic transition-all ${count > 0 ? 'text-gold scale-125' : 'text-white/5'}`}>
+                              {count > 0 ? count : '·'}
+                            </span>
                             <button 
                               onClick={addFilling}
-                              className={`p-2 rounded-xl transition-all ${totalSelected < 2 ? 'text-gold hover:bg-gold/20' : 'text-white/10 cursor-not-allowed'}`}
+                              className={`p-2 rounded-xl transition-all ${totalSelected < 2 ? 'text-gold hover:bg-gold/20' : 'text-white/5 cursor-not-allowed'}`}
                               disabled={totalSelected >= 2}
                             >
                               <Plus size={16} strokeWidth={3} />
@@ -748,7 +1022,7 @@ export default function App() {
             
             {step === 'FLAVORS' ? (
               <button 
-                onClick={() => setStep('CHECKOUT')}
+                onClick={() => setStep('DESIGN_ANALYSIS')}
                 disabled={!isConfigValid()}
                 className={`flex items-center gap-3 py-4 px-10 rounded-full font-black text-[10px] tracking-[0.4em] uppercase transition-all duration-500 shadow-2xl ${
                   isConfigValid() ? 'bg-gold text-petroleo scale-105 active:scale-90' : 'bg-white/5 text-white/10 cursor-not-allowed'
@@ -758,7 +1032,7 @@ export default function App() {
               </button>
             ) : (
               <button 
-                onClick={step === 'SIZE' ? () => {} : () => {
+                onClick={step === 'SIZE' ? () => {} : step === 'DESIGN_ANALYSIS' ? () => setStep('CHECKOUT') : () => {
                   if (order.clientName && order.deliveryDate) {
                     setStep('SUCCESS');
                   } else if (step === 'CHECKOUT') {
@@ -767,10 +1041,10 @@ export default function App() {
                 }}
                 disabled={step === 'CHECKOUT' && (!order.clientName || !order.deliveryDate)}
                 className={`flex items-center gap-3 py-4 px-10 rounded-full font-black text-[10px] tracking-[0.4em] uppercase transition-all duration-500 shadow-2xl ${
-                  (step === 'SIZE' || (order.clientName && order.deliveryDate)) ? 'bg-gold text-petroleo scale-105 active:scale-90 shadow-gold/20' : 'bg-white/5 text-white/10'
+                  (step === 'SIZE' || step === 'DESIGN_ANALYSIS' || (order.clientName && order.deliveryDate)) ? 'bg-gold text-petroleo scale-105 active:scale-90 shadow-gold/20' : 'bg-white/5 text-white/10'
                 }`}
               >
-                {step === 'SIZE' ? 'PASO 02' : <>PEDIR <Smartphone size={14} strokeWidth={4} /></>}
+                {step === 'SIZE' ? 'PASO 02' : step === 'DESIGN_ANALYSIS' ? 'PASAR' : <>PEDIR <Smartphone size={14} strokeWidth={4} /></>}
               </button>
             )}
           </div>
@@ -780,7 +1054,12 @@ export default function App() {
       {/* Back Button for non-welcome steps */}
       {step !== 'WELCOME' && step !== 'SUCCESS' && (
         <button 
-           onClick={() => setStep(step === 'SIZE' ? 'WELCOME' : step === 'FLAVORS' ? 'SIZE' : 'FLAVORS')}
+           onClick={() => setStep(
+             step === 'SIZE' ? 'WELCOME' : 
+             step === 'FLAVORS' ? 'SIZE' : 
+             step === 'DESIGN_ANALYSIS' ? 'FLAVORS' : 
+             'DESIGN_ANALYSIS'
+           )}
            className="fixed top-8 left-8 z-[60] p-4 bg-white/5 backdrop-blur-xl border border-white/10 rounded-full text-gold shadow-2xl active:scale-90 transition-all"
         >
             <ChevronLeft size={20} strokeWidth={3} />
