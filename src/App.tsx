@@ -168,16 +168,33 @@ export default function App() {
   };
 
   // Ayudante para obtener los sabores y precios del tamaño seleccionado
-  const getFlavorsForSelectedSize = () => {
+  const getFlavorsForSelectedSize = (floor: 'BASE' | 'TOP' = 'BASE') => {
     if (!data || !order.size) return [];
     
-    const shapeData = data[order.size.shape];
+    let targetShape = order.size.shape;
+    let targetPortionName = order.size.name.split(' ')[0]; // Ej: "15" de "15 porciones"
+
+    // --- LÓGICA ESPECIAL PARA DOS PISOS ---
+    if (order.size.isDouble) {
+      targetShape = "Circular"; // Los pisos de las tortas dobles siempre son circulares
+      const totalPortions = order.size.name.split(' ')[0];
+      
+      if (totalPortions === "45") {
+        targetPortionName = floor === 'BASE' ? "30" : "20";
+      } else if (totalPortions === "60") {
+        targetPortionName = floor === 'BASE' ? "30" : "30";
+      } else if (totalPortions === "70") {
+        targetPortionName = floor === 'BASE' ? "45" : "30";
+      }
+    }
+
+    const shapeData = data[targetShape];
     if (!shapeData) return [];
 
-    // Buscamos la fila que coincide con el nombre de porciones seleccionado
+    // Buscamos la fila que coincide con el nombre de porciones mapeado
     const row = shapeData.find((r: any) => {
       const porcionKey = Object.keys(r).find(k => k.toLowerCase().includes('porcion'));
-      return r[porcionKey]?.toString() === order.size?.name.split(' ')[0];
+      return r[porcionKey]?.toString() === targetPortionName;
     });
 
     if (!row) return [];
@@ -293,7 +310,7 @@ export default function App() {
             </div>
 
             <div className="snap-x flex overflow-x-auto no-scrollbar gap-5 px-8 py-5">
-              {getFlavorsForSelectedSize().map((f) => {
+              {getFlavorsForSelectedSize('BASE').map((f) => {
                 const isSelected = order.baseFlavor?.name === f.name;
                 return (
                   <div key={f.name} className="snap-center shrink-0 w-[85%] relative aspect-[3/4] rounded-[3rem] overflow-hidden group shadow-2xl transition-transform active:scale-95 border border-white/5">
@@ -331,7 +348,7 @@ export default function App() {
                   <h3 className="font-serif text-3xl italic">Sabor para la Cima</h3>
                 </div>
                 <div className="snap-x flex overflow-x-auto no-scrollbar gap-5 px-8 py-5">
-                  {getFlavorsForSelectedSize().map((f) => {
+                  {getFlavorsForSelectedSize('TOP').map((f) => {
                     const isSelected = order.topFlavor?.name === f.name;
                     return (
                       <div key={`top-${f.name}`} className="snap-center shrink-0 w-[85%] relative aspect-[3/4] rounded-[3rem] overflow-hidden group shadow-2xl transition-transform active:scale-95 border border-white/5">
