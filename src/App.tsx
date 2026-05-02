@@ -51,6 +51,7 @@ export default function App() {
 
   const [activeOverlay, setActiveOverlay] = useState<'BASE' | 'TOP' | 'EXTRAS' | null>(null);
   const [whatsappUrl, setWhatsappUrl] = useState<string>("");
+  const [isFinishing, setIsFinishing] = useState(false);
 
   // --- NAVEGACIÓN Y SCROLL ---
   useEffect(() => {
@@ -95,7 +96,10 @@ export default function App() {
     return true;
   };
 
-  const sendToWhatsApp = async () => {
+  const finalizeOrder = async () => {
+    if (isFinishing) return;
+    setIsFinishing(true);
+
     const total = calculateTotal();
     const abono = (total / 2).toFixed(2);
     
@@ -130,16 +134,18 @@ export default function App() {
       total: `$${total.toFixed(2)}`
     };
 
+    let finalMessage = "";
+
     try {
-      // Intentar guardar en Google Sheets primero
+      // Intentar guardar en Google Sheets
       const response = await fetch(API_URL, { 
         method: 'POST', 
         body: JSON.stringify(datosPedido) 
       });
       const resultado = await response.json();
 
-      const finalMessage = `¡Hola! Vengo de la página web de *Pan & Canela* 🥨✨\n\n` +
-        `*Orden #:* ${resultado.orden || 'Procesando'}\n` +
+      finalMessage = `¡Hola! Vengo de la página web de *Pan & Canela* 🥨✨\n\n` +
+        `*Orden #:* ${resultado.orden || 'Registrada'}\n` +
         `*Cliente:* ${order.clientName}\n` +
         `*Entrega:* ${order.deliveryDate} a las ${order.deliveryTime}\n\n` +
         `*Detalle:* ${formaTamaño}\n` +
@@ -148,13 +154,10 @@ export default function App() {
         (extrasStr !== 'Ninguno' ? `*Extras:* ${extrasStr}\n` : '') +
         `\n*TOTAL:* $${total.toFixed(2)}\n` +
         `📌 *Abono 50%:* *$${abono}* para confirmar tu pedido.`;
-
-      setWhatsappUrl(`https://wa.me/593985482535?text=${encodeURIComponent(finalMessage)}`);
-      setStep('SUCCESS');
     } catch (e) {
       console.error("Error al guardar en Sheets:", e);
-      // Fallback: mensaje vía respaldo
-      const fallbackMsg = `¡Hola! Vengo de la página web (vía respaldo) de *Pan & Canela* 🥨✨\n\n` +
+      // Fallback
+      finalMessage = `¡Hola! Vengo de la página web (vía respaldo) de *Pan & Canela* 🥨✨\n\n` +
         `*Cliente:* ${order.clientName}\n` +
         `*Entrega:* ${order.deliveryDate} a las ${order.deliveryTime}\n\n` +
         `*Detalle:* ${formaTamaño}\n` +
@@ -162,9 +165,10 @@ export default function App() {
         `*Rellenos:* ${rellenosMsj}\n` +
         (extrasStr !== 'Ninguno' ? `*Extras:* ${extrasStr}\n` : '') +
         `\n*TOTAL:* $${total.toFixed(2)}\n`;
-      
-      setWhatsappUrl(`https://wa.me/593985482535?text=${encodeURIComponent(fallbackMsg)}`);
-      setStep('SUCCESS');
+    } finally {
+      const whatsappLink = `https://wa.me/593985482535?text=${encodeURIComponent(finalMessage)}`;
+      window.open(whatsappLink, '_blank');
+      setIsFinishing(false);
     }
   };
 
@@ -449,12 +453,26 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="p-8 bg-gold/5 rounded-[3rem] border border-gold/10 flex gap-6 mt-16 backdrop-blur-md">
+              <div className="p-8 bg-gold/5 rounded-[3rem] border border-gold/10 flex gap-6 mt-16 backdrop-blur-md mb-12">
                 <Info className="text-gold shrink-0 mt-1" size={20} />
                 <p className="text-xs text-white/50 leading-[1.8] italic font-light">
                   Apreciamos tu elección. Tu pedido se agendará formalmente tras verificar el abono del <strong className="text-gold">50% del total</strong> ($${(calculateTotal()/2).toFixed(2)}). Recibirás los datos bancarios al confirmar.
                 </p>
               </div>
+
+              <button 
+                onClick={() => {
+                  if (order.clientName && order.deliveryDate) {
+                    setStep('SUCCESS');
+                  } else {
+                    alert("Por favor completa los datos de entrega.");
+                  }
+                }}
+                disabled={!order.clientName || !order.deliveryDate || !order.deliveryTime}
+                className="w-full py-6 bg-gold text-petroleo font-black rounded-3xl text-xs tracking-[0.3em] uppercase shadow-[0_0_50px_rgba(197,160,89,0.3)] disabled:opacity-20 active:scale-95 transition-all"
+              >
+                CONFIRMAR PEDIDO
+              </button>
             </div>
           </motion.div>
         )}
@@ -469,18 +487,115 @@ export default function App() {
               <Check size={48} className="text-petroleo" strokeWidth={4} />
             </div>
             <h3 className="font-serif text-5xl mb-6 italic text-gold">¡Dulzura Registrada!</h3>
+            
+            {/* TICKET DE PEDIDO */}
+            <div className="bg-white text-petroleo p-8 rounded-3xl w-full max-w-sm mb-10 shadow-2xl relative overflow-hidden font-sans text-left">
+              {/* Serrated Edges Effect */}
+              <div className="absolute top-0 left-0 right-0 h-1 bg-[radial-gradient(circle_at_center,_#122a32_3px,_transparent_3.5px)] bg-[length:12px_12px] bg-repeat-x opacity-10" />
+              
+              <div className="text-center mb-6 pt-4">
+                <span className="text-[10px] font-black tracking-[0.3em] uppercase opacity-40">Resumen del Pedido</span>
+                <h4 className="font-serif italic text-2xl mt-1">Pan & Canela</h4>
+              </div>
+
+              <div className="space-y-4 border-y border-petroleo/10 py-6 my-6 border-dashed">
+                <div className="flex justify-between text-[10px] uppercase font-black tracking-widest opacity-40">
+                  <span>Detalle</span>
+                  <span>Valor</span>
+                </div>
+                
+                <div className="space-y-2">
+                  <div className="flex justify-between text-xs">
+                    <span className="font-bold flex-1">{order.size?.name} ({order.size?.shape})</span>
+                  </div>
+                  
+                  {/* Piso Base */}
+                  <div className="pl-2 border-l-2 border-gold/30">
+                    <p className="text-[10px] font-bold text-gold uppercase tracking-tighter">
+                      {order.size?.isDouble ? 'Piso Abajo' : 'Bizcocho'}
+                    </p>
+                    <p className="text-[11px] font-medium opacity-80">{order.baseFlavor?.name}</p>
+                    <p className="text-[10px] italic opacity-50">
+                      Rellenos: {
+                        (() => {
+                          const counts: { [key: string]: number } = {};
+                          order.baseFillings.forEach(f => counts[f.name] = (counts[f.name] || 0) + 1);
+                          return Object.entries(counts).map(([name, count]) => count > 1 ? `${count}x ${name}` : name).join(', ');
+                        })()
+                      }
+                    </p>
+                  </div>
+
+                  {/* Piso Cima (si es doble) */}
+                  {order.size?.isDouble && (
+                    <div className="pl-2 border-l-2 border-gold/30">
+                      <p className="text-[10px] font-bold text-gold uppercase tracking-tighter">Piso Arriba</p>
+                      <p className="text-[11px] font-medium opacity-80">{order.topFlavor?.name}</p>
+                      <p className="text-[10px] italic opacity-50">
+                        Rellenos: {
+                          (() => {
+                            const counts: { [key: string]: number } = {};
+                            order.topFillings.forEach(f => counts[f.name] = (counts[f.name] || 0) + 1);
+                            return Object.entries(counts).map(([name, count]) => count > 1 ? `${count}x ${name}` : name).join(', ');
+                          })()
+                        }
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Extras */}
+                  {order.selectedExtras.length > 0 && (
+                    <div className="pt-2">
+                      <p className="text-[10px] font-bold uppercase opacity-30 tracking-tighter">Extras</p>
+                      <p className="text-[10px] font-medium italic opacity-70">
+                        {order.selectedExtras.map(e => e.name).join(', ')}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-4 space-y-2 border-t border-petroleo/5">
+                  <div className="flex justify-between text-[11px]">
+                    <span className="opacity-50">Cliente:</span>
+                    <span className="font-bold">{order.clientName}</span>
+                  </div>
+                  <div className="flex justify-between text-[11px]">
+                    <span className="opacity-50">Entrega:</span>
+                    <span className="font-bold">{order.deliveryDate} @ {order.deliveryTime}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs opacity-50 font-medium">Inversión Total:</span>
+                  <span className="text-2xl font-black italic">${calculateTotal().toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center bg-gold/10 p-4 rounded-2xl border border-gold/20">
+                  <div className="flex flex-col">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-gold/60">Reserva (50%)</span>
+                    <span className="text-[10px] opacity-40 tracking-tighter italic">Para confirmar fecha</span>
+                  </div>
+                  <span className="text-lg font-black text-gold">${(calculateTotal() / 2).toFixed(2)}</span>
+                </div>
+              </div>
+
+              {/* Bottom Serrated Edge */}
+              <div className="absolute bottom-0 left-0 right-0 h-1 bg-[radial-gradient(circle_at_center,_#122a32_3px,_transparent_3.5px)] bg-[length:12px_12px] bg-repeat-x opacity-10" />
+            </div>
+
             <p className="text-white/40 font-light mb-10 max-w-xs leading-relaxed italic text-sm">
-              Tu pedido ha sido guardado. Ahora, haz clic abajo para enviarnos tu detalle por WhatsApp y confirmar el pago.
+              Haz clic abajo para enviarnos tu detalle por WhatsApp y registrar oficialmente el pedido.
             </p>
             
-            <a 
-              href={whatsappUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-4 px-10 py-6 bg-gold text-petroleo font-black rounded-full text-xs tracking-[0.3em] uppercase mb-12 shadow-[0_0_50px_rgba(197,160,89,0.3)] active:scale-95 transition-all"
+            <button 
+              onClick={finalizeOrder}
+              disabled={isFinishing}
+              className="flex items-center gap-4 px-10 py-6 bg-gold text-petroleo font-black rounded-full text-xs tracking-[0.3em] uppercase mb-12 shadow-[0_0_50px_rgba(197,160,89,0.3)] active:scale-95 transition-all disabled:opacity-50"
             >
-              CONFIRMAR EN WHATSAPP <Smartphone size={18} strokeWidth={3} />
-            </a>
+              {isFinishing ? 'PROCESANDO...' : 'CONFIRMAR EN WHATSAPP'} 
+              {!isFinishing && <Smartphone size={18} strokeWidth={3} />}
+            </button>
 
             <button 
               onClick={() => window.location.reload()}
@@ -643,7 +758,13 @@ export default function App() {
               </button>
             ) : (
               <button 
-                onClick={step === 'SIZE' ? () => {} : sendToWhatsApp}
+                onClick={step === 'SIZE' ? () => {} : () => {
+                  if (order.clientName && order.deliveryDate) {
+                    setStep('SUCCESS');
+                  } else if (step === 'CHECKOUT') {
+                    alert("Por favor completa los datos de entrega.");
+                  }
+                }}
                 disabled={step === 'CHECKOUT' && (!order.clientName || !order.deliveryDate)}
                 className={`flex items-center gap-3 py-4 px-10 rounded-full font-black text-[10px] tracking-[0.4em] uppercase transition-all duration-500 shadow-2xl ${
                   (step === 'SIZE' || (order.clientName && order.deliveryDate)) ? 'bg-gold text-petroleo scale-105 active:scale-90 shadow-gold/20' : 'bg-white/5 text-white/10'
