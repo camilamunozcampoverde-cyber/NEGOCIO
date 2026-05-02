@@ -82,7 +82,8 @@ export default function App() {
   }, []);
 
   const getImageUrl = (name: string) => {
-    const imgRow = data?.Imagenes?.find((img: any) => img.Producto === name);
+    if (!Array.isArray(data?.Imagenes)) return "https://images.unsplash.com/photo-1578985545062-69928b1d9587?q=80&w=1000&auto=format&fit=crop";
+    const imgRow = data.Imagenes.find((img: any) => img.Producto === name);
     return imgRow?.Imagen || "https://images.unsplash.com/photo-1578985545062-69928b1d9587?q=80&w=1000&auto=format&fit=crop";
   };
 
@@ -237,7 +238,7 @@ export default function App() {
     }
 
     const shapeData = data[targetShape];
-    if (!shapeData) return [];
+    if (!Array.isArray(shapeData)) return [];
 
     // Buscamos la fila que coincide con el nombre de porciones mapeado
     const row = shapeData.find((r: any) => {
@@ -263,7 +264,7 @@ export default function App() {
     setIsAnalyzing(true);
     setAnalysisError(null);
     try {
-      // Consolidamos la lista de adornos de Sheets con los precios específicos del usuario
+      // Consolidamos la lista de adornos específicos del usuario
       const baseAdornosMap: { [key: string]: number } = {
         "Perlas": 1.5,
         "Mariposas": 1.0,
@@ -272,7 +273,6 @@ export default function App() {
       };
       
       const adornosListStr = Object.entries(baseAdornosMap).map(([name, price]) => `${name}: $${price}`).join(', ');
-      const adornosFromSheets = data?.Adornos?.map((a: any) => `${a.Adorno}: $${a.Precio}`).join(', ') || "";
       
       const prompt = `Actúa como la asistente inteligente de tasación para Pan & Canela. Tu objetivo es analizar la imagen de referencia para calcular costos extras.
 
@@ -280,7 +280,6 @@ REGLAS DE NEGOCIO:
 - SOLO trabajamos con crema/ganache. Si detectas FONDANT, rechaza amablemente.
 - PRECIOS DE EXTRAS (Súmalos si los ves):
   ${adornosListStr}
-  ${adornosFromSheets ? `Otros: ${adornosFromSheets}` : ""}
 
 FORMATO DE RESPUESTA:
 1. Un breve informe descriptivo (sin pasos numerados).
@@ -414,42 +413,54 @@ Sé sofisticada y precisa.`;
             <h3 className="font-serif text-4xl mb-12 italic">Elige la Dimensión</h3>
             
             <div className="space-y-8">
-              {data && Object.keys(data).filter(key => !['Rellenos', 'Extras', 'Imagenes', 'Pedidos Recibidos'].includes(key)).map(shape => (
-                <div key={shape} className="space-y-4">
-                  <h4 className="text-white/20 text-[10px] uppercase tracking-[0.5em] font-black flex items-center gap-4">
-                     {shape.replace('_', ' ')} <span className="flex-1 h-[1px] bg-white/5" />
-                  </h4>
-                  <div className="grid gap-4">
-                    {data[shape].map((row: any, idx: number) => {
-                      const porcionKey = Object.keys(row).find(k => k.toLowerCase().includes('porcion')) || '';
-                      return (
-                        <button
-                          key={idx}
-                          onClick={() => {
-                            const foundPrice = Object.values(row).find(v => typeof v === 'number' && v > 0) as number;
-                            setOrder({ ...order, size: { shape, name: `${row[porcionKey]} porciones`, price: foundPrice || 0, isDouble: shape === 'Dos_Pisos' } });
-                            setStep('FLAVORS');
-                          }}
-                          className="flex items-center justify-between p-7 glass-morphism rounded-[2.5rem] hover:bg-white/5 transition-all text-left group border-white/5"
-                        >
-                          <div className="flex items-center gap-5 text-gold">
-                            <div className="p-4 bg-gold/5 rounded-2xl group-hover:bg-gold group-hover:text-petroleo transition-all duration-500">
-                              {shape === 'Dos_Pisos' ? <Layers size={22} /> : <Cake size={22} />}
-                            </div>
-                            <div>
-                              <p className="font-black text-lg tracking-tight group-hover:text-gold transition-colors">{row[porcionKey]} porciones</p>
-                              <p className="text-white/30 text-[10px] uppercase font-bold tracking-widest italic">{shape.replace('_', ' ')}</p>
-                            </div>
-                          </div>
-                          <div className="p-2 bg-white/5 rounded-full group-hover:bg-gold group-hover:translate-x-2 transition-all">
-                             <ChevronRight className="text-white/20 group-hover:text-petroleo" size={16} />
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
+              {data ? (
+                Object.keys(data)
+                  .filter(key => 
+                    !['Rellenos', 'Extras', 'Imagenes', 'Pedidos Recibidos', 'Adornos'].includes(key) && 
+                    Array.isArray(data[key])
+                  )
+                  .map(shape => (
+                    <div key={shape} className="space-y-4">
+                      <h4 className="text-white/20 text-[10px] uppercase tracking-[0.5em] font-black flex items-center gap-4">
+                        {shape.replace('_', ' ')} <span className="flex-1 h-[1px] bg-white/5" />
+                      </h4>
+                      <div className="grid gap-4">
+                        {data[shape].map((row: any, idx: number) => {
+                          const porcionKey = Object.keys(row).find(k => k.toLowerCase().includes('porcion')) || '';
+                          return (
+                            <button
+                              key={idx}
+                              onClick={() => {
+                                const foundPrice = Object.values(row).find(v => typeof v === 'number' && v > 0) as number;
+                                setOrder({ ...order, size: { shape, name: `${row[porcionKey]} porciones`, price: foundPrice || 0, isDouble: shape === 'Dos_Pisos' } });
+                                setStep('FLAVORS');
+                              }}
+                              className="flex items-center justify-between p-7 glass-morphism rounded-[2.5rem] hover:bg-white/5 transition-all text-left group border-white/5"
+                            >
+                              <div className="flex items-center gap-5 text-gold">
+                                <div className="p-4 bg-gold/5 rounded-2xl group-hover:bg-gold group-hover:text-petroleo transition-all duration-500">
+                                  {shape === 'Dos_Pisos' ? <Layers size={22} /> : <Cake size={22} />}
+                                </div>
+                                <div>
+                                  <p className="font-black text-lg tracking-tight group-hover:text-gold transition-colors">{row[porcionKey]} porciones</p>
+                                  <p className="text-white/30 text-[10px] uppercase font-bold tracking-widest italic">{shape.replace('_', ' ')}</p>
+                                </div>
+                              </div>
+                              <div className="p-2 bg-white/5 rounded-full group-hover:bg-gold group-hover:translate-x-2 transition-all">
+                                <ChevronRight className="text-white/20 group-hover:text-petroleo" size={16} />
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))
+              ) : (
+                <div className="flex flex-col items-center justify-center p-20 gap-4 opacity-30">
+                  <div className="w-10 h-10 border-2 border-gold/20 border-t-gold rounded-full animate-spin" />
+                  <p className="text-[10px] font-black tracking-widest uppercase">Cargando dimensiones...</p>
                 </div>
-              ))}
+              )}
             </div>
           </motion.div>
         )}
@@ -908,7 +919,7 @@ Sé sofisticada y precisa.`;
 
             <div className="space-y-4">
               {activeOverlay === 'EXTRAS' ? (
-                data?.Extras?.map((e: any) => {
+                Array.isArray(data?.Extras) ? data.Extras.map((e: any) => {
                   const isSelected = order.selectedExtras.some(ex => ex.name === e.Producto);
                   return (
                     <button
@@ -930,12 +941,14 @@ Sé sofisticada y precisa.`;
                       {isSelected && <div className="p-2 bg-petroleo text-gold rounded-full"><Check size={16} strokeWidth={4} /></div>}
                     </button>
                   );
-                })
+                }) : (
+                  <div className="p-10 text-center opacity-30 italic text-xs">No hay extras disponibles</div>
+                )
               ) : (
                 <>
                   <p className="text-white/20 text-[9px] uppercase font-black tracking-[0.4em] mb-8 italic">Selecciona hasta 2 rellenos artesanales por piso:</p>
                   <div className="grid gap-3">
-                    {data?.Rellenos?.map((f: any) => {
+                    {Array.isArray(data?.Rellenos) ? data.Rellenos.map((f: any) => {
                       const list = activeOverlay === 'BASE' ? order.baseFillings : order.topFillings;
                       const count = list.filter(item => item.name === f.Relleno).length;
                       const totalSelected = list.length;
@@ -992,7 +1005,9 @@ Sé sofisticada y precisa.`;
                           </div>
                         </div>
                       );
-                    })}
+                    }) : (
+                      <div className="p-10 text-center opacity-30 italic text-xs">No hay rellenos disponibles</div>
+                    )}
                   </div>
                 </>
               )}
