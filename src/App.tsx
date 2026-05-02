@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 
-const API_URL = "https://script.google.com/macros/s/AKfycbwCSI5Pai5G6Xp46kcsaRtwRGeFS9wKfMqo-IqD3msFzEzoUlGASb7Mde5nz7coXa-L/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbwleSS4UhEdj1WOmoNXUGGbXiW-_Vt_45Nn9KeU9u9y_ifLdSsK0BGCmBIap-0Ofeaz/exec";
 
 // --- TIPOS ---
 type Step = 'WELCOME' | 'SIZE' | 'FLAVORS' | 'DESIGN_ANALYSIS' | 'CHECKOUT' | 'SUCCESS';
