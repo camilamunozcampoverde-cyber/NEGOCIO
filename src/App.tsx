@@ -50,6 +50,7 @@ export default function App() {
   });
 
   const [activeOverlay, setActiveOverlay] = useState<'BASE' | 'TOP' | 'EXTRAS' | null>(null);
+  const [whatsappUrl, setWhatsappUrl] = useState<string>("");
 
   // --- NAVEGACIÓN Y SCROLL ---
   useEffect(() => {
@@ -137,7 +138,7 @@ export default function App() {
       });
       const resultado = await response.json();
 
-      const message = `¡Hola! Vengo de la página web de *Pan & Canela* 🥨✨\n\n` +
+      const finalMessage = `¡Hola! Vengo de la página web de *Pan & Canela* 🥨✨\n\n` +
         `*Orden #:* ${resultado.orden || 'Procesando'}\n` +
         `*Cliente:* ${order.clientName}\n` +
         `*Entrega:* ${order.deliveryDate} a las ${order.deliveryTime}\n\n` +
@@ -148,11 +149,11 @@ export default function App() {
         `\n*TOTAL:* $${total.toFixed(2)}\n` +
         `📌 *Abono 50%:* *$${abono}* para confirmar tu pedido.`;
 
-      window.open(`https://wa.me/593985482535?text=${encodeURIComponent(message)}`, '_blank');
+      setWhatsappUrl(`https://wa.me/593985482535?text=${encodeURIComponent(finalMessage)}`);
       setStep('SUCCESS');
     } catch (e) {
       console.error("Error al guardar en Sheets:", e);
-      // Fallback: abrir solo WhatsApp si falla el fetch
+      // Fallback: mensaje vía respaldo
       const fallbackMsg = `¡Hola! Vengo de la página web (vía respaldo) de *Pan & Canela* 🥨✨\n\n` +
         `*Cliente:* ${order.clientName}\n` +
         `*Entrega:* ${order.deliveryDate} a las ${order.deliveryTime}\n\n` +
@@ -162,7 +163,7 @@ export default function App() {
         (extrasStr !== 'Ninguno' ? `*Extras:* ${extrasStr}\n` : '') +
         `\n*TOTAL:* $${total.toFixed(2)}\n`;
       
-      window.open(`https://wa.me/593985482535?text=${encodeURIComponent(fallbackMsg)}`, '_blank');
+      setWhatsappUrl(`https://wa.me/593985482535?text=${encodeURIComponent(fallbackMsg)}`);
       setStep('SUCCESS');
     }
   };
@@ -467,13 +468,23 @@ export default function App() {
             <div className="w-28 h-28 bg-gold rounded-full flex items-center justify-center mb-10 shadow-[0_0_100px_rgba(197,160,89,0.4)]">
               <Check size={48} className="text-petroleo" strokeWidth={4} />
             </div>
-            <h3 className="font-serif text-5xl mb-6 italic text-gold">¡Dulzura en Camino!</h3>
-            <p className="text-white/40 font-light mb-16 max-w-xs leading-relaxed italic text-sm">
-              Cada ingrediente será seleccionado con amor. Revisa WhatsApp para continuar con la confirmación del pago.
+            <h3 className="font-serif text-5xl mb-6 italic text-gold">¡Dulzura Registrada!</h3>
+            <p className="text-white/40 font-light mb-10 max-w-xs leading-relaxed italic text-sm">
+              Tu pedido ha sido guardado. Ahora, haz clic abajo para enviarnos tu detalle por WhatsApp y confirmar el pago.
             </p>
+            
+            <a 
+              href={whatsappUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-4 px-10 py-6 bg-gold text-petroleo font-black rounded-full text-xs tracking-[0.3em] uppercase mb-12 shadow-[0_0_50px_rgba(197,160,89,0.3)] active:scale-95 transition-all"
+            >
+              CONFIRMAR EN WHATSAPP <Smartphone size={18} strokeWidth={3} />
+            </a>
+
             <button 
               onClick={() => window.location.reload()}
-              className="text-white/40 font-bold tracking-[0.3em] uppercase text-[10px] border-b border-white/10 pb-2 hover:text-gold hover:border-gold transition-all"
+              className="text-white/20 font-bold tracking-[0.3em] uppercase text-[9px] border-b border-white/5 pb-2 hover:text-gold hover:border-gold transition-all"
             >
               NUEVO PEDIDO
             </button>
