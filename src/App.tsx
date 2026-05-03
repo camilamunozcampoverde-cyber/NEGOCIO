@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ChevronRight, 
@@ -86,7 +86,7 @@ export default function App() {
   };
 
   // --- LÓGICA DE PRECIOS ---
-  const calculateTotal = () => {
+  const calculateTotal = useCallback(() => {
     if (!order.size || !order.baseFlavor) return 0;
     
     let total = 0;
@@ -110,21 +110,34 @@ export default function App() {
     total += order.topFillings.reduce((acc, f) => acc + (f.price || 0), 0);
 
     return total;
-  };
+  }, [order]);
 
-  const isConfigValid = () => {
+  const currentTotal = useMemo(() => calculateTotal(), [calculateTotal]);
+
+  const isDateValid = useMemo(() => {
+    if (!order.deliveryDate) return false;
+    const selectedDate = new Date(order.deliveryDate + 'T00:00:00');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return selectedDate >= today;
+  }, [order.deliveryDate]);
+
+  const isConfigValid = useMemo(() => {
     if (!order.size) return false;
-    // Mandatorio: 2 rellenos por piso
     if (!order.baseFlavor || order.baseFillings.length < 2) return false;
     if (order.size.isDouble && (!order.topFlavor || order.topFillings.length < 2)) return false;
     return true;
-  };
+  }, [order.size, order.baseFlavor, order.baseFillings, order.topFlavor, order.topFillings]);
 
   const finalizeOrder = async () => {
     if (isFinishing) return;
+    if (!isDateValid) {
+      alert("La fecha de entrega no puede ser anterior a hoy.");
+      return;
+    }
     setIsFinishing(true);
 
-    const total = calculateTotal();
+    const total = currentTotal;
     const abono = (total / 2).toFixed(2);
     
     const formaTamaño = order.size?.name || '';
@@ -222,18 +235,16 @@ export default function App() {
   };
 
   // Ayudante para obtener los sabores y precios del tamaño seleccionado
-  const getFlavorsForSelectedSize = (floor: 'BASE' | 'TOP' = 'BASE') => {
+  const getFlavorsForSelectedSize = useCallback((floor: 'BASE' | 'TOP' = 'BASE') => {
     if (!sheetsData || !order.size) return [];
     
     let targetShape = order.size.shape;
-    let targetPortionName = order.size.name.split(' ')[0]; // Ej: "15" de "15 porciones"
+    let targetPortionName = order.size.name.split(' ')[0]; 
 
-    // --- LÓGICA ESPECIAL PARA DOS PISOS ---
     if (order.size.isDouble) {
-      targetShape = "Circular"; // Los pisos de las tortas dobles siempre son circulares
+      targetShape = "Circular"; 
       const totalPortions = parseInt(order.size.name.split(' ')[0]);
       
-      // Mapeo dinámico de porciones por piso para tortas de dos niveles
       if (totalPortions === 30) {
         targetPortionName = floor === 'BASE' ? "20" : "10";
       } else if (totalPortions === 45) {
@@ -243,7 +254,6 @@ export default function App() {
       } else if (totalPortions === 70 || totalPortions === 75) {
         targetPortionName = floor === 'BASE' ? "45" : "30";
       } else {
-        // Fallback genérico si no coincide exactamente
         targetPortionName = floor === 'BASE' ? "30" : "15";
       }
     }
@@ -251,7 +261,6 @@ export default function App() {
     const shapeData = sheetsData[targetShape];
     if (!Array.isArray(shapeData)) return [];
 
-    // Buscamos la fila que coincide con el nombre de porciones mapeado
     const row = shapeData.find((r: any) => {
       const porcionKey = Object.keys(r).find(k => k.toLowerCase().includes('porcion'));
       return r[porcionKey]?.toString() === targetPortionName;
@@ -269,7 +278,7 @@ export default function App() {
       price: parseFloat(row[name]) || 0,
       image: getImageUrl(name)
     }));
-  };
+  }, [sheetsData, order.size, getImageUrl]);
 
   // --- RENDERIZADO ---
   if (isLoadingData) {
@@ -603,19 +612,21 @@ export default function App() {
               <div className="p-8 bg-gold/5 rounded-[3rem] border border-gold/10 flex gap-6 mt-16 backdrop-blur-md mb-12">
                 <Info className="text-gold shrink-0 mt-1" size={20} />
                 <p className="text-xs text-white/50 leading-[1.8] italic font-light">
-                  Apreciamos tu elección. Tu pedido se agendará formalmente tras verificar el abono del <strong className="text-gold">50% del total</strong> ($${(calculateTotal()/2).toFixed(2)}). Recibirás los datos bancarios al confirmar.
+                  Apreciamos tu elección. Tu pedido se agendará formalmente tras verificar el abono del <strong className="text-gold">50% del total</strong> ($${(currentTotal/2).toFixed(2)}). Recibirás los datos bancarios al confirmar.
                 </p>
               </div>
 
               <button 
                 onClick={() => {
-                  if (order.clientName && order.deliveryDate) {
+                  if (order.clientName && isDateValid) {
                     setStep('SUCCESS');
+                  } else if (!isDateValid && order.deliveryDate) {
+                    alert("Por favor elige una fecha válida (hoy o en el futuro).");
                   } else {
                     alert("Por favor completa los datos de entrega.");
                   }
                 }}
-                disabled={!order.clientName || !order.deliveryDate || !order.deliveryTime}
+                disabled={!order.clientName || !isDateValid || !order.deliveryTime}
                 className="w-full py-6 bg-gold text-petroleo font-black rounded-3xl text-xs tracking-[0.3em] uppercase shadow-[0_0_50px_rgba(197,160,89,0.3)] disabled:opacity-20 active:scale-95 transition-all"
               >
                 CONFIRMAR PEDIDO
@@ -716,14 +727,14 @@ export default function App() {
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
                   <span className="text-xs opacity-50 font-medium">Inversión Total:</span>
-                  <span className="text-2xl font-black italic">${calculateTotal().toFixed(2)}</span>
+                  <span className="text-2xl font-black italic">${currentTotal.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between items-center bg-gold/10 p-4 rounded-2xl border border-gold/20">
                   <div className="flex flex-col">
                     <span className="text-[9px] font-black uppercase tracking-widest text-gold/60">Reserva (50%)</span>
                     <span className="text-[10px] opacity-40 tracking-tighter italic">Para confirmar fecha</span>
                   </div>
-                  <span className="text-lg font-black text-gold">${(calculateTotal() / 2).toFixed(2)}</span>
+                  <span className="text-lg font-black text-gold">${(currentTotal / 2).toFixed(2)}</span>
                 </div>
               </div>
 
@@ -936,7 +947,7 @@ export default function App() {
           <div className="bg-petroleo/80 backdrop-blur-3xl border border-white/10 p-5 rounded-[3rem] flex items-center justify-between shadow-[0_20px_50px_rgba(0,0,0,0.5)] pointer-events-auto">
             <div className="flex flex-col pl-4">
               <span className="text-[10px] text-white/30 uppercase font-black tracking-[0.4em] italic mb-1">Inversion</span>
-              <span className="text-gold font-serif text-3xl italic tracking-tight">${calculateTotal().toFixed(2)}</span>
+              <span className="text-gold font-serif text-3xl italic tracking-tight">${currentTotal.toFixed(2)}</span>
             </div>
             
             {step === 'FLAVORS' ? (
