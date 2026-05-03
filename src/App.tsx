@@ -29,7 +29,7 @@ interface OrderState {
   topFlavor: { name: string; price: number; image: string } | null;
   baseFillings: { name: string; price: number }[];
   topFillings: { name: string; price: number }[];
-  selectedExtras: { name: string; price: number }[];
+  selectedExtras: { name: string; price: number; quantity: number }[];
   clientName: string;
   deliveryDate: string;
   deliveryTime: string;
@@ -40,6 +40,8 @@ export default function App() {
   const [sheetsData, setSheetsData] = useState<any>(null);
   const [step, setStep] = useState<Step>('WELCOME');
   const [isLoadingData, setIsLoadingData] = useState(true);
+  const [showFillingsIntro, setShowFillingsIntro] = useState(false);
+  const [hasSeenFillingsIntro, setHasSeenFillingsIntro] = useState(false);
   const [order, setOrder] = useState<OrderState>({
     size: null,
     baseFlavor: null,
@@ -85,28 +87,23 @@ export default function App() {
 
   // --- LÓGICA DE PRECIOS ---
   const calculateTotal = () => {
+    if (!order.size || !order.baseFlavor) return 0;
+    
     let total = 0;
     
-    if (!order.size) return 0;
-
     if (order.size.isDouble) {
       // Para dos pisos, el precio base es la suma de los sabores/dimensiones de cada tier
-      // Si no se ha elegido sabor aún, usamos el primero de la lista para mostrar un "Desde..."
-      const baseOptions = getFlavorsForSelectedSize('BASE');
-      const topOptions = getFlavorsForSelectedSize('TOP');
-      
-      const basePrice = order.baseFlavor?.price ?? (baseOptions[0]?.price || 0);
-      const topPrice = order.topFlavor?.price ?? (topOptions[0]?.price || 0);
+      const basePrice = order.baseFlavor.price;
+      const topPrice = order.topFlavor?.price || 0;
       
       total += basePrice + topPrice;
     } else {
       // Para tortas simples, el precio lo define el sabor (que incluye el base del tamaño)
-      // O el precio base definido en Step 1 si aún no se selecciona sabor
-      total += order.baseFlavor ? order.baseFlavor.price : (order.size.price || 0);
+      total += order.baseFlavor.price;
     }
     
-    // Sumamos los extras seleccionados manualmente
-    total += order.selectedExtras.reduce((acc, e) => acc + (e.price || 0), 0);
+    // Sumamos los extras seleccionados manualmente con su cantidad
+    total += order.selectedExtras.reduce((acc, e) => acc + (e.price * e.quantity || 0), 0);
     
     // Sumamos los rellenos
     total += order.baseFillings.reduce((acc, f) => acc + (f.price || 0), 0);
@@ -117,8 +114,9 @@ export default function App() {
 
   const isConfigValid = () => {
     if (!order.size) return false;
-    if (!order.baseFlavor || order.baseFillings.length < 1) return false;
-    if (order.size.isDouble && (!order.topFlavor || order.topFillings.length < 1)) return false;
+    // Mandatorio: 2 rellenos por piso
+    if (!order.baseFlavor || order.baseFillings.length < 2) return false;
+    if (order.size.isDouble && (!order.topFlavor || order.topFillings.length < 2)) return false;
     return true;
   };
 
@@ -147,7 +145,7 @@ export default function App() {
       : rellenosBase;
 
     const extrasStr = order.selectedExtras.length > 0 
-      ? order.selectedExtras.map(e => e.name).join(', ') 
+      ? order.selectedExtras.map(e => `${e.quantity}x ${e.name}`).join(', ') 
       : 'Ninguno';
 
     const datosPedido = {
@@ -220,6 +218,7 @@ export default function App() {
     });
     setStep('WELCOME');
     setActiveOverlay(null);
+    setHasSeenFillingsIntro(false);
   };
 
   // Ayudante para obtener los sabores y precios del tamaño seleccionado
@@ -288,7 +287,9 @@ export default function App() {
   }
 
   return (
-    <div className="relative min-h-screen max-w-lg mx-auto bg-petroleo text-white font-sans overflow-x-hidden selection:bg-gold selection:text-petroleo">
+    <div className="relative min-h-screen max-w-7xl mx-auto bg-petroleo text-white font-sans overflow-x-hidden selection:bg-gold selection:text-petroleo">
+       {/* Contenedor responsivo para centrar el flujo tipo móvil en desktop pero dar más aire */}
+       <div className="max-w-lg mx-auto min-h-screen relative">
       {/* Dynamic Background */}
       <div className="fixed inset-0 z-0 opacity-20 pointer-events-none">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(197,160,89,0.2),transparent)]" />
@@ -577,6 +578,7 @@ export default function App() {
                     <Calendar className="text-gold/50" size={16} />
                     <input 
                       type="date" 
+                      min={new Date().toISOString().split('T')[0]}
                       value={order.deliveryDate}
                       onChange={e => setOrder({...order, deliveryDate: e.target.value})}
                       className="bg-transparent outline-none flex-1 font-black text-xs placeholder:text-white/10 uppercase tracking-widest text-white"
@@ -693,7 +695,7 @@ export default function App() {
                     <div className="pt-2">
                       <p className="text-[10px] font-bold uppercase opacity-30 tracking-tighter">Extras</p>
                       <p className="text-[10px] font-medium italic opacity-70">
-                        {order.selectedExtras.map(e => e.name).join(', ')}
+                        {order.selectedExtras.map(e => `${e.quantity}x ${e.name}`).join(', ')}
                       </p>
                     </div>
                   )}
@@ -748,6 +750,9 @@ export default function App() {
             >
               NUEVO PEDIDO
             </button>
+            <div className="mt-16 text-center">
+              <p className="text-[10px] text-white/10 italic">Hecho por Ing. Camila Muñoz</p>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -758,11 +763,16 @@ export default function App() {
           <motion.div 
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 200 }}
+            onAnimationComplete={() => {
+              if ((activeOverlay === 'BASE' || activeOverlay === 'TOP') && !hasSeenFillingsIntro) {
+                setShowFillingsIntro(true);
+              }
+            }}
             className="fixed inset-x-0 bottom-0 z-[60] h-[88vh] glass-morphism-dark rounded-t-[4rem] p-8 pb-16 overflow-y-auto"
           >
              <div className="absolute top-4 left-1/2 -translate-x-1/2 w-12 h-1 bg-white/10 rounded-full" />
             
-             <div className="flex justify-between items-center mb-12 sticky top-0 bg-transparent pt-4 z-10">
+            <div className="flex justify-between items-center mb-12 sticky top-0 bg-petroleo/70 backdrop-blur-xl -mx-8 px-8 py-4 z-10">
               <div className="max-w-[80%]">
                 <h4 className="text-gold uppercase tracking-[0.5em] text-[9px] font-black pb-2 italic">
                   {activeOverlay === 'EXTRAS' ? 'COMPLEMENTOS' : `SABOR: ${activeOverlay === 'TOP' ? order.topFlavor?.name : order.baseFlavor?.name}`}
@@ -782,26 +792,58 @@ export default function App() {
             <div className="space-y-4">
               {activeOverlay === 'EXTRAS' ? (
                 Array.isArray(sheetsData?.Extras) ? sheetsData.Extras.map((e: any) => {
-                  const isSelected = order.selectedExtras.some(ex => ex.name === e.Producto);
+                  const extraInOrder = order.selectedExtras.find(ex => ex.name === e.Producto);
+                  const count = extraInOrder?.quantity || 0;
+                  
+                  const updateQuantity = (delta: number) => {
+                    if (delta > 0 && count < 6) {
+                      if (!extraInOrder) {
+                        setOrder({...order, selectedExtras: [...order.selectedExtras, { name: e.Producto, price: e.Precio, quantity: 1 }]});
+                      } else {
+                        setOrder({...order, selectedExtras: order.selectedExtras.map(ex => ex.name === e.Producto ? {...ex, quantity: ex.quantity + 1} : ex)});
+                      }
+                    } else if (delta < 0 && count > 0) {
+                      if (count === 1) {
+                         setOrder({...order, selectedExtras: order.selectedExtras.filter(ex => ex.name !== e.Producto)});
+                      } else {
+                         setOrder({...order, selectedExtras: order.selectedExtras.map(ex => ex.name === e.Producto ? {...ex, quantity: ex.quantity - 1} : ex)});
+                      }
+                    }
+                  };
+
                   return (
-                    <button
+                    <div
                       key={e.Producto}
-                      onClick={() => {
-                        if (isSelected) {
-                          setOrder({...order, selectedExtras: order.selectedExtras.filter(ex => ex.name !== e.Producto)});
-                        } else if (order.selectedExtras.length < 3) {
-                          setOrder({...order, selectedExtras: [...order.selectedExtras, { name: e.Producto, price: e.Precio }]});
-                        }
-                      }}
-                      className={`w-full flex items-center gap-5 p-5 rounded-[2rem] transition-all border group ${isSelected ? 'bg-gold text-petroleo border-gold' : 'bg-white/5 border-white/5 hover:bg-white/10 shadow-lg'}`}
+                      className={`w-full flex items-center justify-between p-5 rounded-[2rem] transition-all border group ${count > 0 ? 'bg-gold/10 border-gold/50' : 'bg-white/5 border-white/5 hover:bg-white/10 shadow-lg'}`}
                     >
-                      <img src={getImageUrl(e.Producto)} className="w-20 h-20 rounded-3xl object-cover shadow-2xl" alt={e.Producto} />
-                      <div className="flex-1 text-left">
-                        <p className="font-black text-sm tracking-tight mb-1">{e.Producto}</p>
-                        <p className={`font-black text-xs italic ${isSelected ? 'text-petroleo/70' : 'text-gold'}`}>+${e.Precio.toFixed(2)}</p>
+                      <div className="flex items-center gap-5 flex-1">
+                        <img src={getImageUrl(e.Producto)} className="w-20 h-20 rounded-3xl object-cover shadow-2xl" alt={e.Producto} />
+                        <div className="text-left">
+                          <p className={`font-black text-sm tracking-tight mb-1 ${count > 0 ? 'text-gold' : 'text-white'}`}>{e.Producto}</p>
+                          <p className={`font-black text-xs italic ${count > 0 ? 'text-gold/70' : 'text-gold'}`}>+${e.Precio.toFixed(2)}</p>
+                        </div>
                       </div>
-                      {isSelected && <div className="p-2 bg-petroleo text-gold rounded-full"><Check size={16} strokeWidth={4} /></div>}
-                    </button>
+
+                      <div className="flex items-center gap-4 bg-petroleo/40 rounded-2xl p-1 border border-white/5 ml-4">
+                        <button 
+                          onClick={() => updateQuantity(-1)}
+                          className={`p-2 rounded-xl transition-all ${count > 0 ? 'text-gold hover:bg-gold/20' : 'text-white/5 cursor-not-allowed'}`}
+                          disabled={count === 0}
+                        >
+                          <Minus size={16} strokeWidth={3} />
+                        </button>
+                        <span className={`w-6 text-center font-black text-sm italic transition-all ${count > 0 ? 'text-gold scale-125' : 'text-white/5'}`}>
+                          {count > 0 ? count : '0'}
+                        </span>
+                        <button 
+                          onClick={() => updateQuantity(1)}
+                          className={`p-2 rounded-xl transition-all ${count < 6 ? 'text-gold hover:bg-gold/20' : 'text-white/5 cursor-not-allowed'}`}
+                          disabled={count >= 6}
+                        >
+                          <Plus size={16} strokeWidth={3} />
+                        </button>
+                      </div>
+                    </div>
                   );
                 }) : (
                   <div className="p-10 text-center opacity-30 italic text-xs">No hay extras disponibles</div>
@@ -840,8 +882,8 @@ export default function App() {
                             <div className={`w-2 h-2 rounded-full transition-all ${count > 0 ? 'bg-gold scale-150' : 'bg-white/20'}`} />
                             <div className="flex flex-col">
                               <span className="font-black uppercase tracking-[0.2em] text-[11px] italic">{f.Relleno}</span>
-                              <span className="text-[9px] opacity-40 italic">
-                                {f.Precio > 0 ? `+$${f.Precio.toFixed(2)}` : 'Incluido'}
+                              <span className={`text-[10px] font-bold italic ${f.Precio > 0 ? 'text-gold' : 'opacity-40'}`}>
+                                {f.Precio > 0 ? `+$${f.Precio.toFixed(2)}` : '$0.00'}
                               </span>
                             </div>
                           </div>
@@ -928,6 +970,43 @@ export default function App() {
         </motion.div>
       )}
 
+      {/* Modal de Intro de Rellenos */}
+      <AnimatePresence>
+        {showFillingsIntro && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-petroleo/90 backdrop-blur-md"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
+              className="bg-petroleo border border-gold/30 rounded-[3rem] p-8 max-w-sm w-full text-center shadow-[0_0_100px_rgba(197,160,89,0.2)]"
+            >
+              <div className="w-20 h-20 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-6 text-gold">
+                <Layers size={40} />
+              </div>
+              <h4 className="font-serif text-3xl italic text-gold mb-4">Doble Relleno</h4>
+              <p className="text-white/60 text-sm leading-relaxed italic mb-8">
+                ¡En Pan & Canela amamos la abundancia! 🥨✨ Nuestras tortas llevan de ley <strong className="text-white">2 capas de relleno</strong> artesanales por cada piso. Elige tus favoritos:
+              </p>
+              
+              <div className="relative aspect-video rounded-3xl overflow-hidden mb-8 border border-white/10">
+                <img src="https://images.unsplash.com/photo-1571115177098-24ec42ed204d?q=80&w=600&auto=format&fit=crop" className="w-full h-full object-cover opacity-60" alt="capas" />
+              </div>
+
+              <button 
+                onClick={() => {
+                  setShowFillingsIntro(false);
+                  setHasSeenFillingsIntro(true);
+                }}
+                className="w-full py-4 bg-gold text-petroleo font-black rounded-full text-[10px] tracking-[0.4em] uppercase shadow-2xl active:scale-95 transition-all"
+              >
+                ENTENDIDO
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Back Button for non-welcome steps */}
       {step !== 'WELCOME' && step !== 'SUCCESS' && (
         <button 
@@ -942,6 +1021,7 @@ export default function App() {
             <ChevronLeft size={20} strokeWidth={3} />
         </button>
       )}
+    </div>
     </div>
   );
 }
