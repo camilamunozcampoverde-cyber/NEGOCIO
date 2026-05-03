@@ -953,12 +953,12 @@ export default function App() {
             {step === 'FLAVORS' ? (
               <button 
                 onClick={() => setStep('DESIGN_ANALYSIS')}
-                disabled={!isConfigValid()}
+                disabled={!isConfigValid}
                 className={`flex items-center gap-3 py-4 px-10 rounded-full font-black text-[10px] tracking-[0.4em] uppercase transition-all duration-500 shadow-2xl ${
-                  isConfigValid() ? 'bg-gold text-petroleo scale-105 active:scale-90' : 'bg-white/5 text-white/10 cursor-not-allowed'
+                  isConfigValid ? 'bg-gold text-petroleo scale-105 active:scale-90' : 'bg-white/5 text-white/10 cursor-not-allowed'
                 }`}
               >
-                {isConfigValid() ? <>LISTO <ArrowRight size={14} strokeWidth={4} /></> : 'RELLENOS...'}
+                {isConfigValid ? <>LISTO <ArrowRight size={14} strokeWidth={4} /></> : 'RELLENOS...'}
               </button>
             ) : (
               <button 
