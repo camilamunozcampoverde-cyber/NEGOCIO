@@ -44,10 +44,11 @@ interface OrderState {
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export default function App() {
-  const [data, setData] = useState<any>(null);
+  const [sheetsData, setSheetsData] = useState<any>(null);
   const [step, setStep] = useState<Step>('WELCOME');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [isLoadingData, setIsLoadingData] = useState(true);
   const [order, setOrder] = useState<OrderState>({
     size: null,
     baseFlavor: null,
@@ -75,15 +76,22 @@ export default function App() {
 
   // --- DATA FETCHING ---
   useEffect(() => {
+    setIsLoadingData(true);
     fetch(API_URL)
       .then(res => res.json())
-      .then(json => setData(json))
-      .catch(err => console.error("Error cargando Sheets:", err));
+      .then(json => {
+        setSheetsData(json);
+        setIsLoadingData(false);
+      })
+      .catch(err => {
+        console.error("Error cargando Sheets:", err);
+        setIsLoadingData(false);
+      });
   }, []);
 
   const getImageUrl = (name: string) => {
-    if (!Array.isArray(data?.Imagenes)) return "https://images.unsplash.com/photo-1578985545062-69928b1d9587?q=80&w=1000&auto=format&fit=crop";
-    const imgRow = data.Imagenes.find((img: any) => img.Producto === name);
+    if (!Array.isArray(sheetsData?.Imagenes)) return "https://images.unsplash.com/photo-1578985545062-69928b1d9587?q=80&w=1000&auto=format&fit=crop";
+    const imgRow = sheetsData.Imagenes.find((img: any) => img.Producto === name);
     return imgRow?.Imagen || "https://images.unsplash.com/photo-1578985545062-69928b1d9587?q=80&w=1000&auto=format&fit=crop";
   };
 
@@ -212,7 +220,7 @@ export default function App() {
 
   // Ayudante para obtener los sabores y precios del tamaño seleccionado
   const getFlavorsForSelectedSize = (floor: 'BASE' | 'TOP' = 'BASE') => {
-    if (!data || !order.size) return [];
+    if (!sheetsData || !order.size) return [];
     
     let targetShape = order.size.shape;
     let targetPortionName = order.size.name.split(' ')[0]; // Ej: "15" de "15 porciones"
@@ -237,7 +245,7 @@ export default function App() {
       }
     }
 
-    const shapeData = data[targetShape];
+    const shapeData = sheetsData[targetShape];
     if (!Array.isArray(shapeData)) return [];
 
     // Buscamos la fila que coincide con el nombre de porciones mapeado
@@ -368,6 +376,20 @@ Sé sofisticada y precisa.`;
     }
   };
 
+  if (isLoadingData) {
+    return (
+      <div className="min-h-screen bg-petroleo flex flex-col items-center justify-center p-10 text-center">
+        <motion.div 
+          animate={{ rotate: 360 }}
+          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+          className="w-16 h-16 border-4 border-gold/20 border-t-gold rounded-full mb-8 shadow-[0_0_50px_-10px_rgba(212,175,55,0.3)]"
+        />
+        <h2 className="font-serif text-3xl text-gold mb-2 italic">Cargando Dulzura</h2>
+        <p className="text-white/30 text-[10px] uppercase tracking-[0.5em] font-black tracking-tighter">Pan & Canela • Pastelería Boutique</p>
+      </div>
+    );
+  }
+
   return (
     <div className="relative min-h-screen max-w-lg mx-auto bg-petroleo text-white font-sans overflow-x-hidden selection:bg-gold selection:text-petroleo">
       {/* Dynamic Background */}
@@ -413,11 +435,11 @@ Sé sofisticada y precisa.`;
             <h3 className="font-serif text-4xl mb-12 italic">Elige la Dimensión</h3>
             
             <div className="space-y-8">
-              {data ? (
-                Object.keys(data)
+              {sheetsData ? (
+                Object.keys(sheetsData)
                   .filter(key => 
                     !['Rellenos', 'Extras', 'Imagenes', 'Pedidos Recibidos', 'Adornos'].includes(key) && 
-                    Array.isArray(data[key])
+                    Array.isArray(sheetsData[key])
                   )
                   .map(shape => (
                     <div key={shape} className="space-y-4">
@@ -425,7 +447,7 @@ Sé sofisticada y precisa.`;
                         {shape.replace('_', ' ')} <span className="flex-1 h-[1px] bg-white/5" />
                       </h4>
                       <div className="grid gap-4">
-                        {data[shape].map((row: any, idx: number) => {
+                        {sheetsData[shape].map((row: any, idx: number) => {
                           const porcionKey = Object.keys(row).find(k => k.toLowerCase().includes('porcion')) || '';
                           return (
                             <button
@@ -919,7 +941,7 @@ Sé sofisticada y precisa.`;
 
             <div className="space-y-4">
               {activeOverlay === 'EXTRAS' ? (
-                Array.isArray(data?.Extras) ? data.Extras.map((e: any) => {
+                Array.isArray(sheetsData?.Extras) ? sheetsData.Extras.map((e: any) => {
                   const isSelected = order.selectedExtras.some(ex => ex.name === e.Producto);
                   return (
                     <button
@@ -948,7 +970,7 @@ Sé sofisticada y precisa.`;
                 <>
                   <p className="text-white/20 text-[9px] uppercase font-black tracking-[0.4em] mb-8 italic">Selecciona hasta 2 rellenos artesanales por piso:</p>
                   <div className="grid gap-3">
-                    {Array.isArray(data?.Rellenos) ? data.Rellenos.map((f: any) => {
+                    {Array.isArray(sheetsData?.Rellenos) ? sheetsData.Rellenos.map((f: any) => {
                       const list = activeOverlay === 'BASE' ? order.baseFillings : order.topFillings;
                       const count = list.filter(item => item.name === f.Relleno).length;
                       const totalSelected = list.length;
