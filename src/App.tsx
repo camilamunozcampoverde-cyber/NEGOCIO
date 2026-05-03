@@ -194,9 +194,32 @@ export default function App() {
         `\n*TOTAL:* $${total.toFixed(2)}\n`;
     } finally {
       const whatsappLink = `https://wa.me/593985482535?text=${encodeURIComponent(finalMessage)}`;
-      window.open(whatsappLink, '_blank');
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      
+      if (isMobile) {
+        window.location.href = whatsappLink;
+      } else {
+        window.open(whatsappLink, '_blank');
+      }
       setIsFinishing(false);
     }
+  };
+
+  const resetOrder = () => {
+    setOrder({
+      size: null,
+      baseFlavor: null,
+      topFlavor: null,
+      baseFillings: [],
+      topFillings: [],
+      selectedExtras: [],
+      clientName: '',
+      deliveryDate: '',
+      deliveryTime: '09:00',
+      designImage: null
+    });
+    setStep('WELCOME');
+    setActiveOverlay(null);
   };
 
   // Ayudante para obtener los sabores y precios del tamaño seleccionado
@@ -720,7 +743,7 @@ export default function App() {
             </button>
 
             <button 
-              onClick={() => window.location.reload()}
+              onClick={resetOrder}
               className="text-white/20 font-bold tracking-[0.3em] uppercase text-[9px] border-b border-white/5 pb-2 hover:text-gold hover:border-gold transition-all"
             >
               NUEVO PEDIDO
