@@ -18,7 +18,7 @@ import {
   MessageCircle
 } from 'lucide-react';
 
-const API_URL = "https://script.google.com/macros/s/AKfycbwleSS4UhEdj1WOmoNXUGGbXiW-_Vt_45Nn9KeU9u9y_ifLdSsK0BGCmBIap-0Ofeaz/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbx1juOuXeCuPEdDObgY4uAocxnati7nM1EjiWSbrW_kIf7so2EPf7IVO-UQU8j7ie1D/exec";
 
 // --- TIPOS ---
 type Step = 'WELCOME' | 'SIZE' | 'FLAVORS' | 'DESIGN_ANALYSIS' | 'CHECKOUT' | 'SUCCESS';
